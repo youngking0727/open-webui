@@ -79,6 +79,12 @@ else
     ARGS=(--workers "$UVICORN_WORKERS")
 fi
 
+# Run OpenBioMed initialization
+if [ -f "/app/openbiomed/init.py" ]; then
+    echo "Running OpenBioMed initialization..."
+    python /app/openbiomed/init.py || echo "OpenBioMed init completed with warnings"
+fi
+
 # Run uvicorn
 WEBUI_SECRET_KEY="$WEBUI_SECRET_KEY" exec "$PYTHON_CMD" -m uvicorn open_webui.main:app \
     --host "$HOST" \
