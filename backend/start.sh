@@ -79,10 +79,22 @@ else
     ARGS=(--workers "$UVICORN_WORKERS")
 fi
 
-# Run OpenBioMed initialization
+# Apply OpenBioMed branding before uvicorn starts (eliminates race condition)
+# This triggers config.py import which rebuilds STATIC_DIR, then overwrites branding files
 if [ -f "/app/openbiomed/init.py" ]; then
-    echo "Running OpenBioMed initialization..."
-    python /app/openbiomed/init.py || echo "OpenBioMed init completed with warnings"
+    echo "Applying OpenBioMed branding before startup..."
+    PYTHONPATH=/app "$PYTHON_CMD" -c "
+from openbiomed.init import apply_branding
+apply_branding()
+" || echo "OpenBioMed branding applied with warnings"
+fi
+
+# Run OpenBioMed skill initialization after app is ready (needs database tables)
+if [ -f "/app/openbiomed/init.py" ]; then
+    echo "OpenBioMed skill init will run after app is healthy..."
+    (while ! curl -s http://localhost:${PORT}/health > /dev/null 2>&1; do sleep 2; done; \
+     echo "Running OpenBioMed skill initialization..."; \
+     "$PYTHON_CMD" /app/openbiomed/init.py || echo "OpenBioMed skill init completed with warnings") &
 fi
 
 # Run uvicorn
