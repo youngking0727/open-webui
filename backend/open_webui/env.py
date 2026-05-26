@@ -129,6 +129,8 @@ SRC_LOG_LEVELS = {}  # Legacy variable, do not remove
 
 WEBUI_NAME = os.environ.get('WEBUI_NAME', 'Open WebUI')
 
+USER_DAILY_QUOTA_LIMIT = int(os.environ.get('USER_DAILY_QUOTA_LIMIT', '60'))
+
 WEBUI_FAVICON_URL = 'https://openwebui.com/favicon.png'
 
 TRUSTED_SIGNATURE_KEY = os.environ.get('TRUSTED_SIGNATURE_KEY', '')

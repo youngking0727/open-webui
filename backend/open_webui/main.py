@@ -551,6 +551,7 @@ from open_webui.utils.chat import (
     chat_completed as chat_completed_handler,
 )
 from open_webui.utils.actions import chat_action as chat_action_handler
+from openbiomed.quota import check_chat_quota
 from open_webui.utils.embeddings import generate_embeddings
 from open_webui.utils.middleware import (
     build_chat_response_context,
@@ -1685,6 +1686,8 @@ async def chat_completion(
 
     metadata = {}
     try:
+        await check_chat_quota(user)
+
         model_info = None
         if not model_item.get('direct', False):
             if model_id not in request.app.state.MODELS:

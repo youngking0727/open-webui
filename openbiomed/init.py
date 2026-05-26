@@ -15,6 +15,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'backend'))
 
 import yaml
 from open_webui.models.skills import Skills, SkillForm, SkillMeta
+from open_webui.models.models import Models, ModelForm, ModelMeta, ModelParams
+from open_webui.models.access_grants import AccessGrants
 
 
 def parse_frontmatter(content: str):
@@ -87,6 +89,37 @@ def ensure_signup_enabled():
     conn.close()
 
 
+async def init_default_model():
+    """注册默认模型并设置公共访问权限"""
+    model_id = os.environ.get('DEFAULT_MODELS', 'deepseek-v4-pro')
+
+    existing = await Models.get_model_by_id(model_id)
+    if existing:
+        print(f"Default model '{model_id}' already registered")
+        # 确保公共访问权限存在
+        has_public = await AccessGrants.has_public_read_access_grant('model', model_id)
+        if not has_public:
+            await AccessGrants.set_access_grants('model', model_id, [
+                {"principal_type": "user", "principal_id": "*", "permission": "read"}
+            ])
+            print(f"Added public read access to '{model_id}'")
+        return
+
+    form_data = ModelForm(
+        id=model_id,
+        name=model_id,
+        meta=ModelMeta(description=f"OpenBioMed 默认模型"),
+        params=ModelParams(),
+        access_grants=[
+            {"principal_type": "user", "principal_id": "*", "permission": "read"}
+        ],
+        is_active=True,
+    )
+
+    await Models.insert_new_model(form_data, user_id='system')
+    print(f"Registered default model '{model_id}' with public access")
+
+
 async def init_skills():
     """初始化预置 skills"""
     skills_dir = Path(__file__).parent / 'skills'
@@ -157,6 +190,7 @@ async def main():
     print("OpenBioMed initialization script starting...")
     apply_branding()
     ensure_signup_enabled()
+    await init_default_model()
     await init_skills()
     print("OpenBioMed initialization complete")
 
