@@ -1,0 +1,24 @@
+services:
+  openbiomed-webui:
+    image: openbiomed-webui:slim
+    container_name: openbiomed-web
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "3001:8080"
+    environment:
+      - WEBUI_NAME=OpenBioMed
+      - ENABLE_SIGNUP=true
+      - DATA_DIR=/app/data
+      - USER_DAILY_QUOTA_LIMIT=60
+      - DEFAULT_MODELS=deepseek-v4-pro
+      - OPENAI_API_KEY=${BAILIAN_API_KEY}
+      - OPENAI_API_BASE_URLS=https://dashscope.aliyuncs.com/compatible-mode/v1
+      - OPENAI_API_KEYS=${BAILIAN_API_KEY}
+      - RAG_EMBEDDING_ENGINE=openai
+      - RAG_EMBEDDING_MODEL=text-embedding-v1
+      - RAG_OPENAI_API_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+      - RAG_OPENAI_API_KEY=${BAILIAN_API_KEY}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
