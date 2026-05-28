@@ -40,29 +40,45 @@ def parse_frontmatter(content: str):
 
 
 def apply_branding():
-    """用 OpenBioMed 品牌资源覆盖后端 STATIC_DIR 的默认文件"""
+    """用 OpenBioMed 品牌资源覆盖默认文件"""
     assets_dir = Path(__file__).parent / 'assets'
     if not assets_dir.exists():
         print("Assets directory not found, skipping branding")
         return
 
-    from open_webui.config import STATIC_DIR
+    from open_webui.config import STATIC_DIR, FRONTEND_BUILD_DIR
 
-    # favicon.png 和 logo.png 有独立源文件，其余用 logo.png 作为源
-    branding_map = {
-        'favicon.png': assets_dir / 'favicon.png',
-        'logo.png': assets_dir / 'logo.png',
-        'splash.png': assets_dir / 'logo.png',
-        'favicon-dark.png': assets_dir / 'logo.png',
-        'splash-dark.png': assets_dir / 'logo.png',
-    }
+    # 需要覆盖的 favicon 目标文件，都使用 favicon.png 作为源
+    favicon_targets = [
+        'favicon.png',
+        'favicon-96x96.png',
+        'favicon.svg',
+        'favicon.ico',
+        'favicon-dark.png',
+        'apple-touch-icon.png',
+    ]
 
-    for dst_name, src_path in branding_map.items():
-        dst_path = STATIC_DIR / dst_name
-        if src_path.exists():
-            dst_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_path, dst_path)
-            print(f"Branding: {src_path.name} -> {dst_path}")
+    favicon_src = assets_dir / 'favicon.png'
+    logo_src = assets_dir / 'logo.png'
+
+    # 需要覆盖的目录: backend STATIC_DIR + 前端构建输出
+    target_dirs = [STATIC_DIR, FRONTEND_BUILD_DIR / 'static', FRONTEND_BUILD_DIR]
+
+    for target_dir in target_dirs:
+        if not target_dir.exists():
+            continue
+        for fname in favicon_targets:
+            dst = target_dir / fname
+            if favicon_src.exists():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(favicon_src, dst)
+        # logo/splash 文件用 logo.png，只覆盖 STATIC_DIR
+        if target_dir == STATIC_DIR:
+            for splash_name in ['logo.png', 'splash.png', 'splash-dark.png']:
+                dst = target_dir / splash_name
+                if logo_src.exists():
+                    shutil.copy2(logo_src, dst)
+                    print(f"Branding: {logo_src.name} -> {dst}")
 
 
 def ensure_signup_enabled():
@@ -90,26 +106,66 @@ def ensure_signup_enabled():
 
 
 async def init_default_model():
-    """注册默认模型并设置公共访问权限"""
+    """注册默认模型并设置公共访问权限和 System Prompt"""
     model_id = os.environ.get('DEFAULT_MODELS', 'deepseek-v4-pro')
+
+    SYSTEM_PROMPT = """你是 OpenBioMed，一个专业的生物医药智能体。你的职责是协助研究人员和从业人员完成以下工作：
+
+- 蛋白质结构设计、功能预测与突变分析
+- 药物分子设计与性质评估
+- 生物信息学数据分析与文献挖掘
+- 实验方案设计建议与结果解读
+
+请基于科学证据回答，不确定时如实说明。回答应专业、准确、简洁。"""
 
     existing = await Models.get_model_by_id(model_id)
     if existing:
         print(f"Default model '{model_id}' already registered")
-        # 确保公共访问权限存在
-        has_public = await AccessGrants.has_public_read_access_grant('model', model_id)
-        if not has_public:
-            await AccessGrants.set_access_grants('model', model_id, [
-                {"principal_type": "user", "principal_id": "*", "permission": "read"}
-            ])
-            print(f"Added public read access to '{model_id}'")
+
+        needs_update = False
+        update_meta = existing.meta.model_dump() if existing.meta else {}
+
+        # 补充 capabilities
+        if not update_meta.get('capabilities', {}).get('web_search'):
+            update_meta.setdefault('capabilities', {})['web_search'] = True
+            needs_update = True
+
+        # 补充 description
+        if not update_meta.get('description'):
+            update_meta['description'] = 'OpenBioMed 生物医药智能体'
+            needs_update = True
+
+        # 补充 system prompt
+        needs_system = not existing.params or not getattr(existing.params, 'system', None)
+
+        if needs_update or needs_system:
+            params_data = existing.params.model_dump() if existing.params else {}
+            if needs_system:
+                params_data['system'] = SYSTEM_PROMPT
+            await Models.update_model_by_id(
+                model_id,
+                ModelForm(
+                    id=model_id,
+                    name=model_id,
+                    meta=ModelMeta(**update_meta),
+                    params=ModelParams(**params_data),
+                ),
+            )
+            print(f"Updated model '{model_id}': {'meta' if needs_update else ''}{' + system prompt' if needs_system else ''}")
+        await AccessGrants.set_access_grants('model', model_id, [
+            {"principal_type": "user", "principal_id": "*", "permission": "read"}
+        ])
+        print(f"Ensured public read access for '{model_id}'")
         return
 
     form_data = ModelForm(
         id=model_id,
         name=model_id,
-        meta=ModelMeta(description=f"OpenBioMed 默认模型"),
-        params=ModelParams(),
+        meta=ModelMeta(
+            description="OpenBioMed 生物医药智能体",
+            capabilities={"web_search": True},
+        ),
+        params=ModelParams(system=SYSTEM_PROMPT),
         access_grants=[
             {"principal_type": "user", "principal_id": "*", "permission": "read"}
         ],
@@ -117,7 +173,7 @@ async def init_default_model():
     )
 
     await Models.insert_new_model(form_data, user_id='system')
-    print(f"Registered default model '{model_id}' with public access")
+    print(f"Registered default model '{model_id}' with system prompt and public access")
 
 
 async def init_skills():
@@ -158,7 +214,9 @@ async def init_skills():
                 content=full_content,
                 meta=SkillMeta(tags=tags if isinstance(tags, list) else []),
                 is_active=True,
-                access_grants=[]
+                access_grants=[
+                    {"principal_type": "user", "principal_id": "*", "permission": "read"}
+                ]
             )
 
             # 检查 skill 是否已存在
@@ -177,6 +235,11 @@ async def init_skills():
                     user_id='system',  # 使用 system 用户
                     form_data=form_data
                 )
+
+            # 确保公共访问权限
+            await AccessGrants.set_access_grants('skill', skill_id, [
+                {"principal_type": "user", "principal_id": "*", "permission": "read"}
+            ])
 
         except Exception as e:
             print(f"Error importing skill {skill_file}: {e}")
