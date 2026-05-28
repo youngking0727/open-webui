@@ -518,9 +518,12 @@ class SafeWebBaseLoader(WebBaseLoader):
                     else:
                         kwargs['ssl'] = AIOHTTP_CLIENT_SESSION_SSL
 
+                    merged_kwargs = self.requests_kwargs | kwargs
+                    merged_kwargs.pop('allow_redirects', None)
+
                     async with session.get(
                         url,
-                        **(self.requests_kwargs | kwargs),
+                        **merged_kwargs,
                         allow_redirects=AIOHTTP_CLIENT_ALLOW_REDIRECTS,
                     ) as response:
                         if self.raise_for_status:
@@ -532,6 +535,9 @@ class SafeWebBaseLoader(WebBaseLoader):
                     else:
                         log.warning(f'Error fetching {url} with attempt {i + 1}/{retries}: {e}. Retrying...')
                         await asyncio.sleep(cooldown * backoff**i)
+                except Exception as e:
+                    log.error(f'Unexpected error fetching {url}: {type(e).__name__}: {e}')
+                    raise
         raise ValueError('retry count exceeded')
 
     def _unpack_fetch_results(self, results: Any, urls: List[str], parser: Union[str, None] = None) -> List[Any]:
